@@ -14,7 +14,7 @@ It is designed using **production-grade engineering principles** commonly expect
 - testability and replaceability of infrastructure components
 - lightweight deployment using in-memory H2 for local execution
 
-### Core Business Capability (Unchanged)
+### Core Business Capability
 
 > Withdraw funds from an account if sufficient balance exists, then publish a withdrawal event.
 
