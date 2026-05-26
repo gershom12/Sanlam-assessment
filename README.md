@@ -219,7 +219,7 @@ On successful withdrawal:
 
 ---
 
-## 5. Transaction Flow (Detailed)
+## 5. Transaction Flow
 
 1. Validate request at API boundary
 2. Execute atomic withdrawal in database
