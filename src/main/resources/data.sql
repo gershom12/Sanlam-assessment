@@ -1,0 +1,2 @@
+INSERT INTO accounts VALUES (1, 1000);
+INSERT INTO accounts VALUES (2, 500);

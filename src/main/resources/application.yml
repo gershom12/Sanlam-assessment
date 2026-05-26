@@ -1,0 +1,18 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:bankdb
+    driverClassName: org.h2.Driver
+    username: sa
+    password:
+
+  h2:
+    console:
+      enabled: true
+
+aws:
+  sns:
+    topic-arn: arn:aws:sns:af-south-1:123456789:withdrawals
+
+logging:
+  level:
+    com.bank.withdrawal: INFO
