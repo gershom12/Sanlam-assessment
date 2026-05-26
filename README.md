@@ -203,10 +203,7 @@ On successful withdrawal:
 
 ### Benefits
 
-- enables downstream consumers:
-    - fraud detection
-    - notifications
-    - analytics pipelines
+- enables downstream consumers
 - decouples core banking logic from side effects
 
 ---
