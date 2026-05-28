@@ -1,299 +1,193 @@
-# Bank Withdrawal Service
+# Bank Withdrawal Service – Technical Submission
 
-## 1. Executive Summary
+### Business Capability
 
-This service implements a **bank account withdrawal capability** with **reliable event publication on successful withdrawal**.
-
-It is designed using **production-grade engineering principles** commonly expected in high-scale financial systems:
-
-- correctness under concurrency (no race conditions)
-- transactional integrity at database level
-- clean separation of concerns
-- resilience for external integrations (SNS)
-- strong observability and traceability
-- testability and replaceability of infrastructure components
-- lightweight deployment using in-memory H2 for local execution
-
-### Core Business Capability (Unchanged)
-
-> Withdraw funds from an account if sufficient balance exists, then publish a withdrawal event.
+- Withdraw money from a bank account
+- Return updated balance and status
+- Publish a withdrawal event to AWS SNS
 
 ---
 
-## 2. Architecture Overview
+## 🧠 Approach Summary
 
-### High-Level Flow
+### Architecture Style
 
-
-Client → Controller → Service → Repository → H2 Database
-↓
-EventPublisher → SNS (AWS)
-
-
-
-### Architectural Style
-
-- Layered Architecture (Controller / Service / Repository)
-- Dependency Inversion (EventPublisher abstraction)
-- Infrastructure isolation (SNS hidden behind interface)
+- Layered architecture:
+  - Controller → Service → Repository → Messaging
+- Clear separation of concerns
+- Single responsibility per layer
 
 ---
 
-## 3. Key Engineering Decisions
+### Core Business Flow (Unchanged)
 
-## 3.1 Clean Layered Architecture
-
-System is structured into clear layers:
-
-- Controller → API boundary (HTTP concerns only)
-- Service → Business logic + orchestration
-- Repository → Persistence logic only
-
-### Why this matters
-
-- prevents business logic leakage into controllers
-- improves maintainability and onboarding speed
-- enables independent testing of layers
-- supports future migration to microservices
+1. Receive withdrawal request (accountId, amount)
+2. Validate input
+3. Atomically deduct balance from database
+4. If successful:
+  - Retrieve updated balance
+  - Publish event to AWS SNS
+  - Return success response
+5. If unsuccessful:
+  - If account does not exist → `AccountNotFoundException`
+  - Otherwise → `InsufficientFundsException`
 
 ---
 
-## 3.2 Concurrency-Safe Atomic Withdrawal
+## ⚙️ Implementation Choices
 
-### ❌ Anti-pattern (race condition prone)
+### 1. Atomic Balance Update (Concurrency Safe)
 
-
-SELECT balance FROM accounts
-UPDATE accounts SET balance = balance - ?
-
-
-### ✔ Correct approach (atomic DB operation)
-
-
+```sql
 UPDATE accounts
 SET balance = balance - ?
 WHERE id = ?
 AND balance >= ?
 
+```
 
-
-### Benefits
-
-- eliminates race conditions
-- prevents double spending
-- enforces invariants at database level
-- reduces application complexity
+# ⚙️ Implementation Details & Design Decisions
 
 ---
 
-## 3.3 Transaction Boundary Strategy
+## 1. Atomic Balance Update (Concurrency Safety)
 
-The service layer is the **single transaction boundary**:
+### Why
 
-@Transactional
-
-
-
-### Guarantees
-
-- atomic DB updates
-- rollback on failure
-- consistent state transitions
+- Prevents race conditions
+- Avoids double spending
+- Ensures data consistency
+- Reduces database round trips
 
 ---
 
-## 3.4 Event Publishing via Abstraction Layer
+## 2. Service Layer Design
 
-Instead of directly coupling to AWS SNS:
+- All business logic resides in `WithdrawalService`
+- Controller remains thin and HTTP-focused
 
-- `EventPublisher` interface
-- `SnsEventPublisher` implementation
+### Why
 
-### Benefits
-
-- decouples business logic from cloud vendor
-- enables easy swap (SNS → Kafka → RabbitMQ)
-- improves unit testing (mockable dependency)
-- supports multi-channel publishing in future
+- Improves testability
+- Improves maintainability
+- Follows clean architecture principles
 
 ---
 
-## 3.5 H2 Database for Local Execution
+## 3. SNS Event Publishing Separation
 
-Uses:
+- SNS logic is isolated in `SnsEventPublisher`
 
-H2 in-memory database
+### Why
 
-### Why H2 is used
-
-- zero infrastructure setup
-- fast startup time
-- ideal for demos / interviews / local dev
-- deterministic schema initialization via SQL scripts
+- Decouples business logic from infrastructure
+- Allows future replacement (Kafka / RabbitMQ)
+- Improves modularity
 
 ---
 
-## 3.6 DTO-Based API Design
+## 4. Exception Handling Strategy
 
-External API uses explicit DTOs:
+### Custom Exceptions
 
-- `WithdrawalRequest`
-- `WithdrawalResponse`
+- `AccountNotFoundException`
+- `InsufficientFundsException`
 
-### Benefits
+### Global Handling
 
-- protects internal domain model from external changes
-- enables API evolution without breaking clients
-- improves clarity of contract boundaries
+- `GlobalExceptionHandler`
 
----
+### Why
 
-## 3.7 Centralized Exception Handling
-
-Implemented using:
-
-
-@RestControllerAdvice
-
-
-### Benefits
-
-- consistent error response format
-- removes boilerplate try/catch from controllers
-- centralized control of HTTP error mapping
+- Consistent API error responses
+- Centralized error handling
+- Cleaner service logic
 
 ---
 
-## 3.8 Structured Logging & Traceability
+## 5. Immutable DTOs (Java Records)
 
-All logs include:
+### Used for
 
-- business context (accountId, amount)
-- correlationId (request trace identifier)
+- Request
+- Response
+- Event
 
-### Benefits
+### Why
 
-- production debugging support
-- audit-friendly execution trace
-- observability-ready structure
-- easier incident root cause analysis
-
----
-
-## 3.9 API Boundary Validation
-
-Validation enforced at entry point:
-
-- amount must be > 0
-- request must not be null
-
-### Benefits
-
-- prevents invalid state entering business logic
-- reduces defensive coding inside service layer
-- enforces contract correctness early
+- Thread-safe
+- Less boilerplate
+- Clear intent
 
 ---
 
-## 3.10 Lightweight Event-Driven Design
+## 6. Dependency Injection
 
-On successful withdrawal:
+- Constructor injection via `@RequiredArgsConstructor`
 
-- domain event is published to SNS
+### Why
 
-### Benefits
-
-- enables downstream consumers:
-    - fraud detection
-    - notifications
-    - analytics pipelines
-- decouples core banking logic from side effects
+- Improves testability
+- Avoids hidden dependencies
+- Aligns with Spring best practices
 
 ---
 
-## 4. Technology Stack
+## 7. AWS SNS Configuration
 
-- Spring Boot (REST + DI)
-- H2 Database (in-memory persistence)
-- JdbcTemplate (lightweight SQL access)
-- AWS SNS SDK (event publishing)
-- Jackson (JSON serialization)
-- Spring Retry (resilience for external calls)
+- SNS client configured via Spring `@Configuration`
 
----
+### Why
 
-## 5. Transaction Flow (Detailed)
-
-1. Validate request at API boundary
-2. Execute atomic withdrawal in database
-3. Retrieve updated balance
-4. Publish withdrawal event (with retry policy)
-5. Return response to client
-6. Log full execution trace with correlationId
+- Centralized configuration
+- Reusable across components
+- Easier environment management
 
 ---
 
-## 6. Reliability & Resilience Considerations
+## 8. Logging Strategy
 
-### 6.1 SNS Publishing Failure Handling
+### Includes
 
-- retries with exponential backoff
-- failure does not rollback DB transaction
-- errors logged with full context
+- accountId
+- amount
+- balance
 
-> Design choice: favor financial correctness over event delivery guarantees
+### Why
 
----
-
-### 6.2 Trade-off: No Outbox Pattern
-
-Current implementation:
-
-- direct publish after DB commit
-
-Production enhancement:
-
-- Outbox Pattern (recommended)
-- guarantees exactly-once event consistency
+- Improves observability
+- Supports debugging in distributed systems
+- Avoids sensitive data leakage
 
 ---
 
-## 7. Known Trade-offs
-
-### 7.1 SNS Inside Service Layer
-
-Current:
-- synchronous publish after DB update
-
-Limitations:
-- partial failure risk (DB success, event failure)
-
-Future improvement:
-- Outbox pattern + async dispatcher
+## 📦 External Library Usage
 
 ---
 
-### 7.2 H2 Database Limitations
+### AWS SNS SDK
 
-- in-memory only (non-persistent)
-- not suitable for production scale testing
-- limited concurrency realism vs production DBs (PostgreSQL, Oracle)
+- `software.amazon.awssdk.services.sns.SnsClient`
+- Used to publish withdrawal events to AWS SNS
+- Requires external AWS credentials configuration
+
+---
+
+### Spring JdbcTemplate
+
+- Used for executing SQL queries
+- Provides direct database interaction without ORM overhead
 
 ---
 
-## 8. Summary of Improvements
+### Jackson ObjectMapper
 
-| Area | Improvement |
-|------|------------|
-| Correctness | Atomic SQL update |
-| Concurrency | Race-condition elimination |
-| Architecture | Clean layered separation |
-| Resilience | Retry-enabled SNS publishing |
-| Observability | Correlation-based logging |
-| Maintainability | Interface-driven design |
-| Testability | Dependency inversion |
-| Portability | H2-based local runtime |
-| Extensibility | Event abstraction layer |
-| Fault tolerance | Controlled failure handling |
+- Converts Java objects to JSON
+- Used for SNS message serialization
 
 ---
+
+### Jakarta Bean Validation
+
+- Ensures request validation at API boundary
+- Prevents invalid withdrawal requests  

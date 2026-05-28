@@ -2,7 +2,7 @@ package com.bank.withdrawal.service;
 
 import com.bank.withdrawal.exception.AccountNotFoundException;
 import com.bank.withdrawal.exception.InsufficientFundsException;
-import com.bank.withdrawal.messaging.EventPublisher;
+import com.bank.withdrawal.messaging.SnsEventPublisher;
 import com.bank.withdrawal.model.WithdrawalEvent;
 import com.bank.withdrawal.model.WithdrawalResponse;
 import com.bank.withdrawal.repository.AccountRepository;
@@ -12,41 +12,32 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class WithdrawalService {
 
-    private final AccountRepository repository;
-    private final EventPublisher eventPublisher;
+    private final AccountRepository accountRepository;
+    private final SnsEventPublisher eventPublisher;
 
     @Transactional
     public WithdrawalResponse withdraw(Long accountId, BigDecimal amount) {
 
-        String correlationId = UUID.randomUUID().toString();
+        validate(accountId, amount);
 
-        log.info("WITHDRAWAL_START correlationId={} accountId={} amount={}",
-                correlationId, accountId, amount);
+        boolean success = accountRepository.withdraw(accountId, amount);
 
-        boolean updated = repository.withdraw(accountId, amount);
+        if (!success) {
 
-        if (!updated) {
-
-            if (!repository.exists(accountId)) {
-                log.warn("ACCOUNT_NOT_FOUND correlationId={} accountId={}",
-                        correlationId, accountId);
+            if (!accountRepository.exists(accountId)) {
                 throw new AccountNotFoundException(accountId);
             }
-
-            log.warn("INSUFFICIENT_FUNDS correlationId={} accountId={}",
-                    correlationId, accountId);
 
             throw new InsufficientFundsException(accountId);
         }
 
-        BigDecimal balance = repository.getBalance(accountId);
+        BigDecimal updatedBalance = accountRepository.getBalance(accountId);
 
         WithdrawalEvent event = new WithdrawalEvent(
                 accountId,
@@ -54,16 +45,30 @@ public class WithdrawalService {
                 "SUCCESS"
         );
 
-        try {
-            eventPublisher.publishWithRetry(event, correlationId);
-        } catch (Exception ex) {
-            log.error("EVENT_PUBLISH_FAILED correlationId={} accountId={}",
-                    correlationId, accountId, ex);
+        // publish AFTER successful withdrawal
+        eventPublisher.publish(event);
+
+        log.info(
+                "WITHDRAWAL_SUCCESS accountId={} amount={} balance={}",
+                accountId, amount, updatedBalance
+        );
+
+        return new WithdrawalResponse(
+                accountId,
+                amount,
+                updatedBalance,
+                "SUCCESS"
+        );
+    }
+
+    private void validate(Long accountId, BigDecimal amount) {
+
+        if (accountId == null) {
+            throw new IllegalArgumentException("accountId is required");
         }
 
-        log.info("WITHDRAWAL_SUCCESS correlationId={} accountId={} balance={}",
-                correlationId, accountId, balance);
-
-        return new WithdrawalResponse(accountId, amount, balance, "SUCCESS");
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("amount must be > 0");
+        }
     }
 }

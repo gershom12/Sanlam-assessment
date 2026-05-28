@@ -5,8 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.retry.annotation.Backoff;
-import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sns.model.PublishRequest;
@@ -14,7 +12,7 @@ import software.amazon.awssdk.services.sns.model.PublishRequest;
 @Component
 @RequiredArgsConstructor
 @Slf4j
-public class SnsEventPublisher implements EventPublisher {
+public class SnsEventPublisher {
 
     private final SnsClient snsClient;
     private final ObjectMapper objectMapper;
@@ -22,13 +20,7 @@ public class SnsEventPublisher implements EventPublisher {
     @Value("${aws.sns.topic-arn}")
     private String topicArn;
 
-    @Override
-    @Retryable(
-            value = Exception.class,
-            maxAttempts = 3,
-            backoff = @Backoff(delay = 500, multiplier = 2)
-    )
-    public void publishWithRetry(WithdrawalEvent event, String correlationId) {
+    public void publish(WithdrawalEvent event) {
 
         try {
             String payload = objectMapper.writeValueAsString(event);
@@ -40,15 +32,19 @@ public class SnsEventPublisher implements EventPublisher {
                             .build()
             );
 
-            log.info("EVENT_PUBLISHED correlationId={} accountId={}",
-                    correlationId, event.accountId());
+            log.info(
+                    "EVENT_PUBLISHED accountId={} amount={}",
+                    event.accountId(),
+                    event.amount()
+            );
 
         } catch (Exception ex) {
 
-            log.warn("EVENT_RETRY_TRIGGER correlationId={} accountId={}",
-                    correlationId, event.accountId());
-
-            throw new RuntimeException(ex);
+            log.error(
+                    "EVENT_PUBLISH_FAILED accountId={}",
+                    event.accountId(),
+                    ex
+            );
         }
     }
 }
